@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Super Bomberman PvP</title>
+
+  <!-- Retro arcade font (used by the HUD and title/game-over screens). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+
+  <!--
+    p5.js 1.x is REQUIRED: p5.js 2.x removed preload(), which this sketch
+    uses to load the sprite sheets before setup() runs.
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.1/p5.min.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #111;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      /* Keep pixel art crisp if the browser scales the canvas. */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+    }
+  </style>
+</head>
+<body>
+  <script src="sketch.js"></script>
+</body>
+</html>
