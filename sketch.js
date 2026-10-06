@@ -117,8 +117,8 @@ const PLAYER_SHEET = {
   rows: 4,
   spriteWidth: null,
   spriteHeight: null,
-  margin: 0,
-  spacing: 0,
+  margin: 5,      // teal border around the shared sheet
+  spacing: 6,     // teal grid lines between frames
   rowFor: { down: 0, right: 1, up: 2, left: 3 },
   idleCol: 1,
   walkSequence: [0, 1, 2, 1],   // columns visited while walking (loops)
