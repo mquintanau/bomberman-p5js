@@ -1,64 +1,23 @@
-/* =============================================================================
- *  SUPER BOMBERMAN PvP  —  p5.js arcade clone
- * -----------------------------------------------------------------------------
- *  Files:   index.html  +  sketch.js  (this file)
- *  Assets:  put your PNGs in ./assets/ (see ASSET_PATHS below). Every asset is
- *           OPTIONAL: if a file is missing, a procedurally drawn placeholder
- *           sheet with the same layout is generated so the game is always
- *           playable while you work on your art.
- *
- *  Controls
- *    Player 1:  W A S D  = move     SPACE = bomb
- *    Player 2:  ARROWS   = move     ENTER = bomb
- *    R = restart (on the game-over screen)
- *
- *  Code map
- *    1. Configuration (grid, gameplay tuning, controls)
- *    2. Sprite configuration + preload()
- *    3. Helpers (SpriteSheet class, math helpers)
- *    4. GameMap     – grid, generation, collision queries, drawing
- *    5. Player      – input, grid movement with corner-sliding, animation
- *    6. Bomb        – fuse timer, ping-pong animation, pass-through logic
- *    7. Explosion   – flame spreading, block destruction, drawing
- *    8. Game        – owns everything, state machine, damage, HUD
- *    9. Placeholder art generators (used only when a PNG is missing)
- *   10. p5.js entry points (setup, draw, keyPressed, keyReleased)
- * ===========================================================================*/
-
-
-/* =============================================================================
- *  1. CONFIGURATION
- * ===========================================================================*/
-
-// --- Grid -------------------------------------------------------------------
-// 13x13 instead of 12x12 on purpose: the classic Bomberman pillar pattern puts
-// a solid block on every (even, even) interior cell. With an ODD size the
-// pattern is symmetric and both spawn corners (1,1) and (11,11) are open.
-// With an even size (12) the bottom-right spawn would land on a pillar.
-const COLS = 13;
+const COLS = 15;
 const ROWS = 13;
 const TILE = 48;          // on-screen size of one grid cell, in pixels
 const HUD_H = 64;         // height of the score bar above the arena
 
-// --- Tile types stored in GameMap.tiles -------------------------------------
 const TILE_EMPTY   = 0;   // walkable floor
 const TILE_SOLID   = 1;   // indestructible (border + pillars)
 const TILE_BRICK   = 2;   // destructible block
-const TILE_BURNING = 3;   // brick that was hit; blocks until the flame ends
+const TILE_BURNING = 3;   // brick that was hit. Blocks until the flame ends
 
-// --- Gameplay tuning --------------------------------------------------------
-const START_LIVES       = 3;
-const PLAYER_SPEED      = 150;   // pixels per second (~3 tiles/s)
+const START_LIVES       = 1;
+const PLAYER_SPEED      = 150;   // pixels per second
 const MAX_BOMBS         = 2;     // bombs a player can have on the field at once
 const BOMB_RANGE        = 2;     // flame length in tiles (each direction)
 const BOMB_FUSE         = 2.5;   // seconds before a bomb explodes
 const EXPLOSION_TIME    = 0.6;   // seconds the flames stay on screen
 const INVULNERABLE_TIME = 2.0;   // i-frames after being hit (prevents multi-hits)
-const BRICK_DENSITY     = 0.7;   // chance (0..1) a free interior cell gets a brick
+const BRICK_DENSITY     = 0.7;
 
-// --- Directions -------------------------------------------------------------
-// `angle` is the rotation that turns an "up-pointing" image into this direction
-// (used to rotate the explosion beam image).
+// `angle` used to rotate the explosion beam image
 const DIRS = {
   up:    { x:  0, y: -1, angle: 0 },
   right: { x:  1, y:  0, angle: Math.PI / 2 },
@@ -66,59 +25,41 @@ const DIRS = {
   left:  { x: -1, y:  0, angle: -Math.PI / 2 },
 };
 
-// --- Controls (raw keyCodes, because p5 constants like UP_ARROW do not exist
-//     yet when this file is parsed) ------------------------------------------
 const CONTROLS = {
   p1: { up: 87, left: 65, down: 83, right: 68, bomb: 32 },   // W A S D, Space
   p2: { up: 38, left: 37, down: 40, right: 39, bomb: 13 },   // Arrows, Enter
 };
 const KEY_RESTART = 82; // R
 
-
-/* =============================================================================
- *  2. SPRITES — configuration + preload()
- * ===========================================================================*/
-
-// Where to put your PNG files. Rename to whatever you like.
 const ASSET_PATHS = {
   player1:   'assets/player1.png',
   player2:   'assets/player2.png',    // optional: if missing, a recoloured copy of player1 is used
   bomb:      'assets/bomb.png',
   explosion: 'assets/explosion.png',
-  solid:     'assets/block_solid.png', // optional single-tile images for the map
+  solid:     'assets/block_solid.png',
   brick:     'assets/block_brick.png',
   floor:     'assets/floor.png',
 };
 
-// Placeholder image variables (filled in preload()).
 let imgPlayer1, imgPlayer2, imgBomb, imgExplosion;
 let imgSolidBlock, imgBrickBlock, imgFloor;
 
 /*
- * PLAYER SPRITESHEET — 4 rows x 3 columns.
- *   - Each ROW is one facing direction. `rowFor` maps direction -> row index.
- *     NOTE: the sheet you shared is ordered Down, Right, Up, Left (row 1 faces
- *     right, row 3 faces left). If your file is Down, Up, Left, Right instead,
- *     change it to { down: 0, up: 1, left: 2, right: 3 }.
- *   - Each COLUMN is a walk frame. Column 1 (middle) is the idle pose.
- *
  * spriteWidth / spriteHeight
  *   Size of ONE frame inside the PNG. Leave as null to auto-compute them from
  *   the image size, the number of columns/rows, the outer `margin` and the
  *   `spacing` between frames:
  *       spriteWidth  = (imageWidth  - 2*margin - (cols-1)*spacing) / cols
  *       spriteHeight = (imageHeight - 2*margin - (rows-1)*spacing) / rows
- *   The reference sheet you pasted (346x678 px) has teal grid lines: use
- *   margin ≈ 5 and spacing ≈ 6 for that exact file. A clean sheet with frames
- *   packed edge-to-edge uses margin 0, spacing 0.
+ *   clean sheet with frames packed edge-to-edge uses margin 0, spacing 0.
  */
 const PLAYER_SHEET = {
   cols: 3,
   rows: 4,
   spriteWidth: null,
   spriteHeight: null,
-  margin: 5,      // teal border around the shared sheet
-  spacing: 6,     // teal grid lines between frames
+  margin: 0,
+  spacing: 0,
   rowFor: { down: 0, right: 1, up: 2, left: 3 },
   idleCol: 1,
   walkSequence: [0, 1, 2, 1],   // columns visited while walking (loops)
@@ -126,11 +67,6 @@ const PLAYER_SHEET = {
   drawWidth: TILE,              // on-screen width; height keeps the frame's aspect ratio
 };
 
-/*
- * BOMB SPRITESHEET — 1 row x 3 columns, played as a PING-PONG loop:
- *   0, 1, 2, 1, 0, 1, 2, 1 ...
- * The animation speeds up when the fuse is about to run out.
- */
 const BOMB_SHEET = {
   cols: 3,
   rows: 1,
@@ -143,31 +79,14 @@ const BOMB_SHEET = {
   fastBelow: 0.8,           // switch to fast when fuse < this many seconds
 };
 
-/*
- * EXPLOSION IMAGE — one PNG containing TWO areas:
- *   side   : the beam piece, copied into the 4 directions (up/down/left/right)
- *   center : the piece drawn on the tile where the bomb was
- * Areas are given as FRACTIONS of the image (0..1) so they survive resizing.
- * Defaults match the image you shared: beam on top, center on the bottom,
- * separated by a thin yellow line around the middle.
- *
- * sideImagePoints: which way the tip of the beam points in your PNG.
- * Your beam tapers upward, so 'up'. Each direction is then a rotation of it.
- */
 const EXPLOSION_SHEET = {
   side:   { x: 0, y: 0.00, w: 1, h: 0.48 },
   center: { x: 0, y: 0.52, w: 1, h: 0.48 },
   sideImagePoints: 'up',
 };
 
-// Sprite sheet objects built in setup() (from your PNGs or from placeholders).
 let sheetP1, sheetP2, sheetBomb, sheetExplosion;
 
-/**
- * Loads an image that is allowed to be missing.
- * Passing a failure callback to loadImage() lets preload() finish even if the
- * file does not exist; we flag the image so setup() knows to use a placeholder.
- */
 function loadOptionalImage(path) {
   const img = loadImage(
     path,
@@ -180,13 +99,11 @@ function loadOptionalImage(path) {
   return img;
 }
 
-/** True when an image from loadOptionalImage() actually loaded. */
 function isUsable(img) {
   return img && !img.failed && img.width > 1;
 }
 
 function preload() {
-  // >>> Point these at your own PNG files (see ASSET_PATHS above). <<<
   imgPlayer1    = loadOptionalImage(ASSET_PATHS.player1);
   imgPlayer2    = loadOptionalImage(ASSET_PATHS.player2);
   imgBomb       = loadOptionalImage(ASSET_PATHS.bomb);
@@ -198,16 +115,13 @@ function preload() {
 
 /**
  * Turns the loaded images into SpriteSheet objects. Any missing image is
- * replaced with a generated placeholder that uses the SAME grid layout, so the
- * slicing code below is exercised exactly as it will be with your real art.
+ * replaced with a generated placeholder that uses the SAME grid layout
  */
 function buildSprites() {
-  // --- Player 1 ---
   sheetP1 = isUsable(imgPlayer1)
     ? new SpriteSheet(imgPlayer1, PLAYER_SHEET)
     : new SpriteSheet(makePlaceholderPlayerSheet('#f4f4f4', '#2f6fff'), packed(PLAYER_SHEET));
 
-  // --- Player 2 (own sheet > recoloured player 1 > placeholder) ---
   if (isUsable(imgPlayer2)) {
     sheetP2 = new SpriteSheet(imgPlayer2, PLAYER_SHEET);
   } else if (isUsable(imgPlayer1)) {
@@ -216,12 +130,10 @@ function buildSprites() {
     sheetP2 = new SpriteSheet(makePlaceholderPlayerSheet('#262626', '#ff3b3b'), packed(PLAYER_SHEET));
   }
 
-  // --- Bomb ---
   sheetBomb = isUsable(imgBomb)
     ? new SpriteSheet(imgBomb, BOMB_SHEET)
     : new SpriteSheet(makePlaceholderBombSheet(), packed(BOMB_SHEET));
 
-  // --- Explosion (two regions: side + center) ---
   sheetExplosion = isUsable(imgExplosion)
     ? new SpriteSheet(imgExplosion, EXPLOSION_SHEET)
     : new SpriteSheet(makePlaceholderExplosion(), {
@@ -231,37 +143,21 @@ function buildSprites() {
         sideImagePoints: 'up',
       });
 
-  // --- Map tiles (single images, no slicing needed) ---
   if (!isUsable(imgSolidBlock)) imgSolidBlock = makePlaceholderSolidTile();
   if (!isUsable(imgBrickBlock)) imgBrickBlock = makePlaceholderBrickTile();
   if (!isUsable(imgFloor))      imgFloor      = makePlaceholderFloorTile();
 }
 
-/** Same sheet config but with no margin/spacing (for generated placeholders). */
 function packed(cfg) {
   return { ...cfg, margin: 0, spacing: 0, spriteWidth: null, spriteHeight: null };
 }
 
-
-/* =============================================================================
- *  3. HELPERS
- * ===========================================================================*/
-
-/**
- * SpriteSheet — wraps one image and knows how to crop frames out of it.
- *
- * Cropping uses the 9-argument form of p5's image():
- *     image(src, dx, dy, dWidth, dHeight, sx, sy, sWidth, sHeight)
- * (dx..dHeight = where to draw on screen, sx..sHeight = rectangle to cut from
- *  the sheet). It is the same idea as copy(), but draws straight to the canvas.
- */
 class SpriteSheet {
   constructor(img, cfg) {
     this.img = img;
     this.cfg = cfg;
   }
 
-  // Size of a single frame inside the source image (auto-computed if null).
   get spriteWidth() {
     const { cols = 1, margin = 0, spacing = 0, spriteWidth } = this.cfg;
     return spriteWidth ?? (this.img.width - 2 * margin - (cols - 1) * spacing) / cols;
@@ -271,7 +167,6 @@ class SpriteSheet {
     return spriteHeight ?? (this.img.height - 2 * margin - (rows - 1) * spacing) / rows;
   }
 
-  /** Draws grid cell (col, row) of the sheet into the screen rectangle. */
   drawFrame(col, row, dx, dy, dw, dh) {
     const { margin = 0, spacing = 0 } = this.cfg;
     const sw = this.spriteWidth;
@@ -281,7 +176,6 @@ class SpriteSheet {
     image(this.img, dx, dy, dw, dh, sx, sy, sw, sh);
   }
 
-  /** Draws a fractional region {x,y,w,h} (0..1) of the image. */
   drawRegion(region, dx, dy, dw, dh) {
     const W = this.img.width;
     const H = this.img.height;
@@ -289,34 +183,23 @@ class SpriteSheet {
   }
 }
 
-/** Moves `value` toward `target` by at most `maxStep`, never overshooting. */
 function approach(value, target, maxStep) {
   const diff = target - value;
   if (Math.abs(diff) <= maxStep) return target;
   return value + Math.sign(diff) * maxStep;
 }
 
-/**
- * Ping-pong frame index: for n = 3 it yields 0,1,2,1,0,1,2,1...
- * `step` is an ever-increasing frame counter.
- */
 function pingPong(step, n) {
   if (n <= 1) return 0;
-  const period = 2 * (n - 1);          // n=3 -> period 4: [0,1,2,1]
+  const period = 2 * (n - 1);
   const i = step % period;
   return i < n ? i : period - i;
 }
 
-/** Pixel coordinate of the centre of grid cell `index`. */
 function cellCenter(index) {
   return index * TILE + TILE / 2;
 }
 
-
-/* =============================================================================
- *  4. GAMEMAP
- *  (Named GameMap instead of Map because Map is a built-in JavaScript class.)
- * ===========================================================================*/
 class GameMap {
   /**
    * @param {number} cols
@@ -330,7 +213,6 @@ class GameMap {
     this.generate(spawns);
   }
 
-  /** Builds border, pillar grid, and random bricks (keeping spawns clear). */
   generate(spawns) {
     // Cells that must stay EMPTY: each spawn plus its two neighbours along
     // the corridors, so every player has an "L" of room to drop a first bomb
@@ -370,7 +252,6 @@ class GameMap {
     this.tiles[row][col] = type;
   }
 
-  /** Walls of any kind block movement (bombs are checked separately). */
   isWalkable(col, row) {
     return this.get(col, row) === TILE_EMPTY;
   }
@@ -382,7 +263,6 @@ class GameMap {
         const y = r * TILE;
         const t = this.tiles[r][c];
 
-        // Floor goes under everything (bricks may have transparent pixels).
         image(imgFloor, x, y, TILE, TILE);
 
         if (t === TILE_SOLID) {
@@ -390,21 +270,15 @@ class GameMap {
         } else if (t === TILE_BRICK) {
           image(imgBrickBlock, x, y, TILE, TILE);
         } else if (t === TILE_EMPTY && this.get(c, r - 1) !== TILE_EMPTY) {
-          // Little SNES touch: blocks cast a shadow onto the floor below them.
           noStroke();
           fill(0, 0, 0, 60);
           rect(x, y, TILE, TILE * 0.18);
         }
-        // TILE_BURNING is drawn by the Explosion that is burning it.
       }
     }
   }
 }
 
-
-/* =============================================================================
- *  5. PLAYER
- * ===========================================================================*/
 class Player {
   /**
    * @param {number} id        1 or 2
@@ -419,23 +293,18 @@ class Player {
     this.sheet = sheet;
     this.color = color;
 
-    // Position = centre of the player's "feet", in arena pixels.
     this.x = cellCenter(col);
     this.y = cellCenter(row);
 
     this.lives = START_LIVES;
-    this.invulnerable = 0;          // seconds of i-frames left
+    this.invulnerable = 0;
     this.maxBombs = MAX_BOMBS;
     this.range = BOMB_RANGE;
 
-    // Animation state
     this.facing = id === 1 ? 'down' : 'up';
     this.isWalking = false;
     this.walkTime = 0;
 
-    // Movement keys currently held, in the order they were pressed.
-    // The LAST one wins, so tapping a new direction overrides the old one
-    // (feels much better than fixed priority when two keys are down).
     this.heldDirs = [];
   }
 
@@ -443,12 +312,10 @@ class Player {
     return this.lives > 0;
   }
 
-  /** Grid cell that contains the player's centre point. */
   get col() { return Math.floor(this.x / TILE); }
   get row() { return Math.floor(this.y / TILE); }
 
-  // ---------------------------------------------------------------- input --
-  /** Returns true if the key belonged to this player (so we can consume it). */
+
   onKeyPressed(code, game) {
     const dir = this.dirForKey(code);
     if (dir) {
@@ -482,19 +349,17 @@ class Player {
     this.heldDirs = [];
   }
 
-  // ---------------------------------------------------------------- bombs --
   placeBomb(game) {
     if (!this.alive || game.state !== 'playing') return;
 
     const ownBombs = game.bombs.filter((b) => b.owner === this).length;
     if (ownBombs >= this.maxBombs) return;
-    if (game.bombAt(this.col, this.row)) return;               // one bomb per cell
+    if (game.bombAt(this.col, this.row)) return;
     if (!game.map.isWalkable(this.col, this.row)) return;
 
     game.bombs.push(new Bomb(this, this.col, this.row, this.range, game.players));
   }
 
-  // --------------------------------------------------------------- update --
   update(dt, game) {
     if (this.invulnerable > 0) this.invulnerable -= dt;
     if (!this.alive) return;
@@ -511,30 +376,13 @@ class Player {
     }
   }
 
-  /** Can this player step into cell (col,row)? Walls and bombs block. */
   canEnter(col, row, game) {
     if (!game.map.isWalkable(col, row)) return false;
     const bomb = game.bombAt(col, row);
-    // A bomb only blocks you once you've stepped off it (see Bomb.passThrough).
+    // A bomb only blocks you once you've stepped off it.
     return !bomb || bomb.passThrough.has(this);
   }
 
-  /**
-   * Grid-lane movement with corner sliding (the classic Bomberman feel).
-   *
-   * The arena is a set of 1-tile-wide corridors ("lanes"). To move along an
-   * axis you must be centred on a lane of the other axis:
-   *   - "along"  = axis we want to move on (x for left/right)
-   *   - "across" = the perpendicular axis   (y for left/right)
-   *
-   * 1. If we are not centred across, we slide toward a lane centre first.
-   *    If the lane we're in is blocked ahead but the neighbouring lane we are
-   *    leaning into is open, we slide into THAT lane instead. This is what
-   *    lets you round corners without pixel-perfect alignment.
-   * 2. If we are centred, we move forward if the next cell is enterable;
-   *    otherwise we may still walk up to the centre of our current cell
-   *    (so we stop flush against the wall, never inside it).
-   */
   move(dir, step, game) {
     const horizontal = dir.x !== 0;
     const sign = horizontal ? dir.x : dir.y;
@@ -546,12 +394,10 @@ class Player {
     const alongCenter  = cellCenter(alongIdx);
     const acrossCenter = cellCenter(acrossIdx);
 
-    // Helper: test a cell using (along, across) indices for either axis.
     const enterable = (a, b) => (horizontal ? this.canEnter(a, b, game) : this.canEnter(b, a, game));
 
     if (across !== acrossCenter) {
-      // ---- 1. Corner sliding ------------------------------------------------
-      const leanSign = Math.sign(across - acrossCenter);   // which side we lean to
+      const leanSign = Math.sign(across - acrossCenter);
       const otherLane = acrossIdx + leanSign;
       const aheadOpen = enterable(alongIdx + sign, acrossIdx);
       const otherOpen = enterable(alongIdx + sign, otherLane) && enterable(alongIdx, otherLane);
@@ -559,11 +405,11 @@ class Player {
       const target = !aheadOpen && otherOpen ? cellCenter(otherLane) : acrossCenter;
       across = approach(across, target, step);
     } else {
-      // ---- 2. Straight movement ---------------------------------------------
+      // Straight movement
       if (enterable(alongIdx + sign, acrossIdx)) {
         along += sign * step;
       } else if ((alongCenter - along) * sign > 0) {
-        along = approach(along, alongCenter, step);       // stop flush at the wall
+        along = approach(along, alongCenter, step);
       }
     }
 
@@ -571,37 +417,32 @@ class Player {
     else            { this.y = along; this.x = across; }
   }
 
-  // --------------------------------------------------------------- damage --
   hit() {
     if (this.invulnerable > 0 || !this.alive) return;
     this.lives--;
     this.invulnerable = INVULNERABLE_TIME;
   }
 
-  // ----------------------------------------------------------------- draw --
-  /** Which spritesheet column to show this frame. */
   currentColumn() {
-    if (!this.isWalking) return PLAYER_SHEET.idleCol;          // middle frame = idle
+    if (!this.isWalking) return PLAYER_SHEET.idleCol;
     const seq = PLAYER_SHEET.walkSequence;
     const i = Math.floor(this.walkTime / PLAYER_SHEET.walkFrameTime) % seq.length;
     return seq[i];
   }
 
   draw() {
-    // Blink while invulnerable (skip every other 80 ms).
     if (this.invulnerable > 0 && Math.floor(this.invulnerable * 12) % 2 === 0) return;
 
     const dw = PLAYER_SHEET.drawWidth;
-    const dh = dw * (this.sheet.spriteHeight / this.sheet.spriteWidth); // keep aspect
+    const dh = dw * (this.sheet.spriteHeight / this.sheet.spriteWidth);
     const dx = this.x - dw / 2;
     const dy = this.y + TILE / 2 - dh;   // feet sit on the bottom of the cell; head overhangs upward
 
-    // Drop shadow
     noStroke();
     fill(0, 0, 0, 70);
     ellipse(this.x, this.y + TILE * 0.38, TILE * 0.7, TILE * 0.22);
 
-    if (!this.alive) tint(255, 90);      // ghost when defeated
+    if (!this.alive) tint(255, 90);
     const row = PLAYER_SHEET.rowFor[this.facing];
     this.sheet.drawFrame(this.currentColumn(), row, dx, dy, dw, dh);
     noTint();
@@ -615,10 +456,6 @@ class Player {
   }
 }
 
-
-/* =============================================================================
- *  6. BOMB
- * ===========================================================================*/
 class Bomb {
   constructor(owner, col, row, range, players) {
     this.owner = owner;
@@ -628,20 +465,15 @@ class Bomb {
     this.fuse = BOMB_FUSE;
     this.exploded = false;
 
-    // Animation
     this.frameTimer = 0;
-    this.frameStep = 0;    // ever-increasing counter, fed to pingPong()
+    this.frameStep = 0;
 
-    // Players standing on this cell when the bomb is dropped may walk OFF it.
-    // Once a player leaves the cell they are removed from this set, and from
-    // then on the bomb is a solid obstacle for them like everyone else.
     this.passThrough = new Set(players.filter((p) => p.col === col && p.row === row));
   }
 
   update(dt) {
     this.fuse -= dt;
 
-    // Ping-pong animation; frames get faster as the fuse runs out.
     const frameTime = this.fuse < BOMB_SHEET.fastBelow ? BOMB_SHEET.fastFrameTime : BOMB_SHEET.frameTime;
     this.frameTimer += dt;
     while (this.frameTimer >= frameTime) {
@@ -659,19 +491,15 @@ class Bomb {
   }
 
   draw() {
-    const frame = pingPong(this.frameStep, BOMB_SHEET.cols);   // 0,1,2,1,0...
+    const frame = pingPong(this.frameStep, BOMB_SHEET.cols);
     sheetBomb.drawFrame(frame, 0, this.col * TILE, this.row * TILE, TILE, TILE);
   }
 }
 
-
-/* =============================================================================
- *  7. EXPLOSION
- * ===========================================================================*/
 class Explosion {
   /**
-   * @param {Player} owner  who placed the bomb (owner is immune to it)
-   * @param {number} col,row  centre cell
+   * @param {Player} owner
+   * @param {number} col
    */
   constructor(owner, col, row) {
     this.owner = owner;
@@ -679,9 +507,9 @@ class Explosion {
     this.row = row;
     this.timer = EXPLOSION_TIME;
 
-    this.cells = [];      // [{col,row,kind:'center'|'side',dir}]
-    this.burning = [];    // bricks this explosion is destroying [{col,row}]
-    this.cellKeys = new Set();   // "col,row" for fast hit tests
+    this.cells = [];
+    this.burning = [];
+    this.cellKeys = new Set();
   }
 
   addCell(col, row, kind, dir) {
@@ -690,11 +518,6 @@ class Explosion {
   }
 
   /**
-   * Spreads flames in the 4 directions up to `range` cells.
-   *  - SOLID / BURNING blocks stop the flame (not included).
-   *  - A BRICK stops the flame and starts burning (destroyed when we finish).
-   *  - Another BOMB stops the flame and is returned so the Game can chain-
-   *    detonate it (its own explosion will cover that cell).
    * @returns {Bomb[]} bombs hit by this explosion
    */
   spread(range, map, bombs) {
@@ -739,17 +562,14 @@ class Explosion {
   update(dt, map) {
     this.timer -= dt;
     if (this.finished) {
-      // Burnt bricks become floor once the flame is gone.
       for (const b of this.burning) map.set(b.col, b.row, TILE_EMPTY);
     }
   }
 
   draw() {
-    // 0 -> 1 over the explosion's life. Flames grow, peak, then thin out.
     const t = 1 - Math.max(this.timer, 0) / EXPLOSION_TIME;
     const pulse = 0.55 + 0.45 * Math.sin(t * Math.PI);
 
-    // Bricks being destroyed: flicker and fade out.
     for (const b of this.burning) {
       tint(255, 255 * (1 - t), 255 * (1 - t), 255 * (1 - t * 0.9));
       image(imgBrickBlock, b.col * TILE, b.row * TILE, TILE, TILE);
@@ -766,9 +586,8 @@ class Explosion {
         scale(pulse);
         sheetExplosion.drawRegion(sheetExplosion.cfg.center, -TILE / 2, -TILE / 2, TILE, TILE);
       } else {
-        // Same "side" image for every beam cell, rotated to face outward.
         rotate(DIRS[cell.dir].angle - pointsAngle);
-        scale(pulse, 1);   // thicken/thin across the beam, keep length so cells connect
+        scale(pulse, 1);
         sheetExplosion.drawRegion(sheetExplosion.cfg.side, -TILE / 2, -TILE / 2, TILE, TILE);
       }
       pop();
@@ -776,10 +595,6 @@ class Explosion {
   }
 }
 
-
-/* =============================================================================
- *  8. GAME — owns the map, players, bombs and explosions
- * ===========================================================================*/
 class Game {
   constructor() {
     this.state = 'title';     // 'title' | 'playing' | 'gameover'
@@ -787,8 +602,8 @@ class Game {
   }
 
   reset() {
-    const spawn1 = { col: 1, row: 1 };                       // top-left
-    const spawn2 = { col: COLS - 2, row: ROWS - 2 };         // bottom-right
+    const spawn1 = { col: 1, row: 1 };
+    const spawn2 = { col: COLS - 2, row: ROWS - 2 };
 
     this.map = new GameMap(COLS, ROWS, [spawn1, spawn2]);
     this.players = [
@@ -798,7 +613,7 @@ class Game {
     this.bombs = [];
     this.explosions = [];
     this.winner = null;
-    this.stateTime = 0;       // seconds spent in the current state
+    this.stateTime = 0;
   }
 
   setState(s) {
@@ -810,7 +625,6 @@ class Game {
     return this.bombs.find((b) => b.col === col && b.row === row);
   }
 
-  /** Explodes a bomb and, recursively, every bomb its flames reach. */
   detonate(bomb) {
     if (bomb.exploded) return;
     bomb.exploded = true;
@@ -823,32 +637,26 @@ class Game {
     for (const other of chained) this.detonate(other);
   }
 
-  // ---------------------------------------------------------------- update --
   update(dt) {
     this.stateTime += dt;
     if (this.state !== 'playing') return;
 
-    // 1. Players move
     for (const p of this.players) p.update(dt, this);
 
-    // 2. Bombs tick; detonate the ones whose fuse ran out
     for (const b of this.bombs) b.update(dt);
     for (const b of [...this.bombs]) {
       if (b.readyToExplode) this.detonate(b);
     }
 
-    // 3. Explosions age and disappear
     for (const e of this.explosions) e.update(dt, this.map);
     this.explosions = this.explosions.filter((e) => !e.finished);
 
-    // 4. Damage: only flames from the OPPOSING player hurt you
     for (const e of this.explosions) {
       for (const p of this.players) {
-        if (p !== e.owner && p.alive && e.covers(p.col, p.row)) p.hit();
+        if (p.alive && e.covers(p.col, p.row)) p.hit();
       }
     }
 
-    // 5. Win check (both dying on the same frame is a draw)
     const alive = this.players.filter((p) => p.alive);
     if (alive.length < this.players.length) {
       this.winner = alive.length === 1 ? alive[0] : null;
@@ -856,7 +664,6 @@ class Game {
     }
   }
 
-  // ----------------------------------------------------------------- input --
   /** @returns {boolean} true if the key was used by the game */
   keyPressed(code) {
     if (this.state === 'title') {
@@ -866,7 +673,6 @@ class Game {
       }
     } else if (this.state === 'gameover') {
       const confirm = code === CONTROLS.p1.bomb || code === CONTROLS.p2.bomb;
-      // Short delay so a panicked bomb-press doesn't skip the result screen.
       if (code === KEY_RESTART || (confirm && this.stateTime > 1)) {
         this.reset();
         this.setState('playing');
@@ -874,8 +680,6 @@ class Game {
       }
     }
 
-    // Movement keys are tracked in every state, so holding a key while the
-    // round starts works immediately.
     let used = false;
     for (const p of this.players) used = p.onKeyPressed(code, this) || used;
     return used;
@@ -891,7 +695,6 @@ class Game {
     for (const p of this.players) p.clearInput();
   }
 
-  // ------------------------------------------------------------------ draw --
   draw() {
     background(10);
     this.drawHUD();
@@ -919,9 +722,7 @@ class Game {
     textFont('Press Start 2P');
     const [p1, p2] = this.players;
 
-    // Player 1 — left side
     this.drawPlayerBadge(p1, 16, 'left');
-    // Player 2 — right side
     this.drawPlayerBadge(p2, width - 16, 'right');
 
     fill(255, 220, 60);
@@ -931,7 +732,7 @@ class Game {
   }
 
   drawPlayerBadge(player, x, side) {
-    const heartSize = 3;                  // size of one "pixel" of the heart
+    const heartSize = 3;
     const heartW = HEART_PIXELS[0].length * heartSize;
     const gap = 6;
 
@@ -960,22 +761,36 @@ class Game {
     textFont('Press Start 2P');
     textAlign(CENTER, CENTER);
 
-    fill(255, 220, 60);
-    textSize(28);
-    text('SUPER', cx, cy - 150);
-    text('BOMBERMAN', cx, cy - 110);
+    textSize(24);
+    strokeWeight(4);
+    stroke(0, 210, 255);
+    fill(0, 50, 255);
+    text('SUPER', cx - 50, cy - 174);
+
+    textSize(40);
+    strokeWeight(5);
+    stroke(32, 0, 0);
+    fill(255, 68, 0);
+    text('CAPUCHO', cx, cy - 140);
+
+    textSize(32);
+    stroke(255);
+    strokeWeight(2);
+    fill(255, 140, 0);
+    text('MAN', cx + 100, cy - 104);
+
+    noStroke();
     fill(255);
     textSize(14);
     text('P v P   B A T T L E', cx, cy - 66);
 
     textSize(10);
     fill('#7fa8ff');
-    text('P1  W A S D  move   SPACE bomb', cx, cy - 10);
+    text('P1: W A S D move - SPACE tear gas', cx, cy - 10);
     fill('#ff8080');
-    text('P2  ARROWS  move   ENTER bomb', cx, cy + 14);
+    text('P2:  ARROWS move - ENTER tear gas', cx, cy + 14);
     fill(220);
-    text("Only your rival's flames hurt you.", cx, cy + 50);
-    text(`${START_LIVES} lives each. Last bomber standing wins!`, cx, cy + 70);
+    text(`${START_LIVES} lives each. Last player without tears wins!`, cx, cy + 50);
 
     if (Math.floor(this.stateTime * 2) % 2 === 0) {
       fill(255);
@@ -1008,7 +823,6 @@ class Game {
   }
 }
 
-// 7x6 pixel heart used in the HUD.
 const HEART_PIXELS = [
   '0110110',
   '1111111',
@@ -1026,18 +840,11 @@ function drawPixelHeart(x, y, s, filled) {
       if (HEART_PIXELS[r][c] === '1') rect(x + c * s, y + r * s, s, s);
     }
   }
-  if (filled) {               // tiny highlight
+  if (filled) {
     fill(255, 200);
     rect(x + s, y + s, s, s);
   }
 }
-
-
-/* =============================================================================
- *  9. PLACEHOLDER ART (only used when a PNG is missing)
- *  Each generator draws into an off-screen p5.Graphics laid out exactly like
- *  the real sheet, so the slicing/animation code runs identically.
- * ===========================================================================*/
 
 function newCanvas(w, h) {
   const g = createGraphics(w, h);
@@ -1048,7 +855,6 @@ function newCanvas(w, h) {
   return g;
 }
 
-/** 3 cols x 4 rows player sheet, rows ordered per PLAYER_SHEET.rowFor. */
 function makePlaceholderPlayerSheet(bodyColor, accentColor) {
   const fw = 24;
   const fh = 36;
@@ -1061,7 +867,6 @@ function makePlaceholderPlayerSheet(bodyColor, accentColor) {
       const oy = row * fh;
       const lift = col - 1;            // -1 / 0 / +1 -> which foot is up
 
-      // Feet (one lifts on frames 0 and 2 = walk cycle; frame 1 = idle)
       g.fill(accentColor);
       g.rect(ox + 5,  oy + 31 - (lift < 0 ? 2 : 0), 6, 4);
       g.rect(ox + 13, oy + 31 - (lift > 0 ? 2 : 0), 6, 4);
@@ -1096,7 +901,6 @@ function makePlaceholderPlayerSheet(bodyColor, accentColor) {
   return g;
 }
 
-/** 1 row x 3 cols bomb sheet; the bomb swells a little on each frame. */
 function makePlaceholderBombSheet() {
   const fs = 32;
   const g = newCanvas(fs * 3, fs);
@@ -1117,7 +921,6 @@ function makePlaceholderBombSheet() {
   return g;
 }
 
-/** 32x64 image: top half = vertical beam (side), bottom half = cross (center). */
 function makePlaceholderExplosion() {
   const s = 32;
   const g = newCanvas(s, s * 2);
@@ -1126,12 +929,12 @@ function makePlaceholderExplosion() {
     [10, '#ffb000'],
     [13, '#fff7d0'],
   ];
-  // Side: a full-length vertical beam so neighbouring cells join seamlessly.
+
   for (const [inset, col] of bands) {
     g.fill(col);
     g.rect(inset, 0, s - inset * 2, s);
   }
-  // Center: a plus sign plus a bright core.
+
   for (const [inset, col] of bands) {
     g.fill(col);
     g.rect(inset, s, s - inset * 2, s);
@@ -1169,7 +972,6 @@ function makePlaceholderFloorTile() {
   return g;
 }
 
-/** Makes a recoloured copy of an image once (cheaper than tint() every frame). */
 function makeTintedCopy(img, rgb) {
   const g = createGraphics(img.width, img.height);
   g.pixelDensity(1);
@@ -1180,16 +982,12 @@ function makeTintedCopy(img, rgb) {
   return g;
 }
 
-
-/* =============================================================================
- *  10. p5.js ENTRY POINTS
- * ===========================================================================*/
 let game;
 
 function setup() {
   createCanvas(COLS * TILE, ROWS * TILE + HUD_H);
   pixelDensity(1);
-  noSmooth();                     // crisp, unblurred pixel art when scaling sprites
+  noSmooth();
   buildSprites();
   game = new Game();
 
@@ -1199,7 +997,7 @@ function setup() {
 }
 
 function draw() {
-  // deltaTime is in ms. Clamp it so a lag spike (or a background tab) can't
+  // deltaTime is in ms. A lag spike or a background tab can't
   // teleport players through walls.
   const dt = Math.min(deltaTime / 1000, 1 / 20);
   game.update(dt);
